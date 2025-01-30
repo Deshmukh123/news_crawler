@@ -1,47 +1,40 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
-	"news_crawler/crawler"
-	"news_crawler/extractor"
-	"news_crawler/storage"
-	"news_crawler/utils"
 	"os"
+	"webcrawler/crawler"
 )
 
 func main() {
-	// Ensure a URL is provided via command line
+	// Check if a URL was provided as a command-line argument
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <news_url>")
-		os.Exit(1)
-	}
-	baseURL := os.Args[1]
-
-	var allArticles []extractor.Article
-
-	// Crawl multiple pages (modify limit if needed)
-	for page := 1; page <= 3; page++ {
-		pagedURL := utils.GeneratePagedURL(baseURL, page)
-		html, err := crawler.FetchHTML(pagedURL)
-		if err != nil {
-			log.Printf("Skipping page %d due to error: %v", page, err)
-			continue
-		}
-
-		// Extract articles
-		articles := extractor.ExtractArticles(html, baseURL)
-		allArticles = append(allArticles, articles...)
+		log.Fatal("Please provide a URL to start crawling")
 	}
 
-	// Save to JSON
-	if len(allArticles) > 0 {
-		err := storage.SaveToJSON("news_data.json", allArticles)
-		if err != nil {
-			log.Fatalf("Failed to save data: %v", err)
-		}
-		fmt.Println("✅ Data saved in news_data.json")
-	} else {
-		fmt.Println("❌ No articles found!")
+	// Get the URL from the command-line argument
+	url := os.Args[1]
+
+	// Crawl the website starting from the given URL
+	visited, err := crawler.CrawlWebsite(url, 3) // Adjust depth as needed
+	if err != nil {
+		log.Fatal("Error crawling website:", err)
 	}
+
+	// Create a file to store the results
+	file, err := os.Create("news.json")
+	if err != nil {
+		log.Fatal("Error creating file:", err)
+	}
+	defer file.Close()
+
+	// Write the articles to the JSON file
+	err = json.NewEncoder(file).Encode(visited)
+	if err != nil {
+		log.Fatal("Error encoding articles to JSON:", err)
+	}
+
+	fmt.Println("Articles saved to news.json")
 }

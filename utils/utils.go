@@ -1,14 +1,16 @@
 package utils
 
 import (
-	"fmt"
 	"strings"
 )
 
-// GeneratePagedURL modifies the base URL to include pagination
-func GeneratePagedURL(baseURL string, page int) string {
-	if strings.Contains(baseURL, "?") {
-		return fmt.Sprintf("%s&page=%d", baseURL, page)
-	}
-	return fmt.Sprintf("%s?page=%d", baseURL, page)
+// CleanText removes unnecessary whitespace and newlines from text
+func CleanText(text string) string {
+	// Remove newline characters and trim spaces
+	return strings.TrimSpace(strings.ReplaceAll(text, "\n", ""))
+}
+
+// IsJavaScriptLink checks if a link is a JavaScript void link
+func IsJavaScriptLink(link string) bool {
+	return strings.HasPrefix(link, "javascript:void(0)")
 }
