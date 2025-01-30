@@ -2,10 +2,11 @@ package crawler
 
 import (
 	"fmt"
-	"github.com/gocolly/colly/v2"
 	"log"
 	"strings"
 	"webcrawler/utils"
+
+	"github.com/gocolly/colly/v2"
 )
 
 // Article struct to hold the article's data
@@ -64,6 +65,25 @@ func CrawlWebsite(url string, maxDepth int) ([]Article, error) {
 	// Handle errors
 	c.OnError(func(r *colly.Response, err error) {
 		log.Println("Request URL:", r.Request.URL, "failed with response:", r, "\nError:", err)
+	})
+
+	// Find the "next" page link (or page numbers) for pagination
+
+	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		link := e.Attr("href")
+		if strings.Contains(link, "next") { // Adjust this to the pagination structure of the site
+			link = utils.CleanText(link)
+			if !visited[link] && len(link) > 0 {
+				visited[link] = true
+				fmt.Println("Found next page:", link)
+
+				// Visit the next page recursively
+				err := c.Visit(link)
+				if err != nil {
+					log.Println("Error visiting next page:", err)
+				}
+			}
+		}
 	})
 
 	// Start crawling from the initial URL
