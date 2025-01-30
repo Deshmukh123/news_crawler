@@ -3,61 +3,84 @@ package crawler
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
-	"webcrawler/utils"
 
 	"github.com/gocolly/colly/v2"
 )
 
-// Article struct to hold the article's data
-type Article struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
-}
+func CrawlWebsite(baseURL string, depth int) ([]map[string]string, error) {
+	var visited []map[string]string
 
-// CrawlWebsite will crawl the website starting from a URL and return a list of articles
-// The maxDepth prevents crawling too deep into the site.
-func CrawlWebsite(url string, maxDepth int) ([]Article, error) {
 	// Create a new collector
 	c := colly.NewCollector()
 
-	// To avoid revisiting the same URL
-	visited := make(map[string]bool)
-
-	// Slice to hold the articles
-	var articles []Article
-
-	// On every article link found, extract the title and URL
+	// On every article link found, extract the URL and print it
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		link := e.Attr("href")
-		title := e.Text
+		if len(link) > 0 {
+			// Check if the link is relative
+			if !strings.HasPrefix(link, "http") {
+				// Prepend base URL to the relative link
+				parsedURL, err := url.Parse(link)
+				if err != nil {
+					log.Println("Error parsing URL:", err)
+					return
+				}
 
-		// Clean the title and URL
-		title = utils.CleanText(title)
-		link = utils.CleanText(link)
-
-		// Filter out unwanted links (JavaScript links, empty titles, or invalid URLs)
-		if len(link) > 0 && !utils.IsJavaScriptLink(link) && len(title) > 0 && !visited[link] {
-			// Mark the link as visited
-			visited[link] = true
-
-			// Store the article if it's a valid one
-			if strings.HasPrefix(link, "http") {
-				articles = append(articles, Article{
-					Title: title,
-					URL:   link,
-				})
-				fmt.Println("Article found:", link)
+				// If it's a relative link, resolve it against the base URL
+				if !parsedURL.IsAbs() {
+					link = baseURL + link
+				}
 			}
 
-			// If not at max depth, visit the link recursively
-			if maxDepth > 0 {
-				go func(url string, depth int) {
-					_, err := CrawlWebsite(url, depth-1)
-					if err != nil {
-						log.Println("Error crawling:", url, err)
-					}
-				}(link, maxDepth-1)
+			// Clean up the title by trimming unnecessary spaces or newlines
+			title := strings.TrimSpace(e.Text)
+			title = strings.ReplaceAll(title, "\n", "")
+
+			// Filter out JavaScript links or empty titles
+			if len(link) > 0 && !strings.HasPrefix(link, "javascript:void(0)") && len(title) > 0 {
+				// Store the article's title and URL
+				article := map[string]string{
+					"title": title,
+					"url":   link,
+				}
+
+				// Append the article to visited list
+				visited = append(visited, article)
+
+				// Print the link (for debugging)
+				fmt.Println("Article found:", link)
+			}
+		}
+
+	})
+
+	// Handle pagination (next page link)
+	c.OnHTML("a[rel=next]", func(e *colly.HTMLElement) {
+		nextPageLink := e.Attr("href")
+		if len(nextPageLink) > 0 {
+			// Check if the next page link is relative, if so, prepend the base URL
+			if !strings.HasPrefix(nextPageLink, "http") {
+				parsedURL, err := url.Parse(nextPageLink)
+				if err != nil {
+					log.Println("Error parsing next page URL:", err)
+					return
+				}
+
+				// If it's a relative link, resolve it against the base URL
+				if !parsedURL.IsAbs() {
+					nextPageLink = baseURL + nextPageLink
+				}
+			}
+
+			// Print the next page link (for debugging)
+			fmt.Println("Next page found:", nextPageLink)
+
+			// Visit the next page (pagination)
+			err := c.Visit(nextPageLink)
+			if err != nil {
+				log.Println("Error visiting next page:", err)
 			}
 		}
 	})
@@ -67,33 +90,11 @@ func CrawlWebsite(url string, maxDepth int) ([]Article, error) {
 		log.Println("Request URL:", r.Request.URL, "failed with response:", r, "\nError:", err)
 	})
 
-	// Find the "next" page link (or page numbers) for pagination
-
-	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		link := e.Attr("href")
-		if strings.Contains(link, "next") { // Adjust this to the pagination structure of the site
-			link = utils.CleanText(link)
-			if !visited[link] && len(link) > 0 {
-				visited[link] = true
-				fmt.Println("Found next page:", link)
-
-				// Visit the next page recursively
-				err := c.Visit(link)
-				if err != nil {
-					log.Println("Error visiting next page:", err)
-				}
-			}
-		}
-	})
-
-	// Start crawling from the initial URL
-	err := c.Visit(url)
+	// Start scraping the page
+	err := c.Visit(baseURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error visiting the page: %w", err)
 	}
 
-	// Wait for all async tasks to complete
-	c.Wait()
-
-	return articles, nil
+	return visited, nil
 }
