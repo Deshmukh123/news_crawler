@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gocolly/colly/v2"
 )
@@ -12,8 +14,29 @@ import (
 func CrawlWebsite(baseURL string, depth int) ([]map[string]string, error) {
 	var visited []map[string]string
 
+	var mu sync.Mutex // Mutex to avoid race conditions in concurrent appends
+
+	//  Added Rate Limiting & Concurrency
+	c := colly.NewCollector(
+		colly.Async(true), //  Enable asynchronous crawling
+		colly.MaxDepth(depth),
+	)
+
+	//  Limit Requests (Rate Limiting)
+	err := c.Limit(&colly.LimitRule{
+		DomainGlob:  "*",
+		Parallelism: 2,             //  Allow 2 concurrent requests
+		Delay:       1 * time.Second, //  1 second delay between requests
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error setting rate limit: %w", err)
+	}
+
+	//  WaitGroup to handle async requests
+	var wg sync.WaitGroup
+
 	// Create a new collector
-	c := colly.NewCollector()
+	// c := colly.NewCollector()
 
 	// On every article link found, extract the URL and print it
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
@@ -46,8 +69,10 @@ func CrawlWebsite(baseURL string, depth int) ([]map[string]string, error) {
 					"url":   link,
 				}
 
-				// Append the article to visited list
+				//  Thread-Safe Append Using Mutex
+				mu.Lock()
 				visited = append(visited, article)
+				mu.Unlock()
 
 				// Print the link (for debugging)
 				fmt.Println("Article found:", link)
@@ -77,11 +102,15 @@ func CrawlWebsite(baseURL string, depth int) ([]map[string]string, error) {
 			// Print the next page link (for debugging)
 			fmt.Println("Next page found:", nextPageLink)
 
-			// Visit the next page (pagination)
-			err := c.Visit(nextPageLink)
-			if err != nil {
-				log.Println("Error visiting next page:", err)
-			}
+			//  Concurrent Next Page Visits
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := c.Visit(nextPageLink)
+				if err != nil {
+					log.Println("Error visiting next page:", err)
+				}
+			}()
 		}
 	})
 
@@ -90,11 +119,19 @@ func CrawlWebsite(baseURL string, depth int) ([]map[string]string, error) {
 		log.Println("Request URL:", r.Request.URL, "failed with response:", r, "\nError:", err)
 	})
 
-	// Start scraping the page
-	err := c.Visit(baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("error visiting the page: %w", err)
-	}
+	// Start the scraping
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := c.Visit(baseURL)
+		if err != nil {
+			log.Println("Error visiting the page:", err)
+		}
+	}()
+
+	wg.Wait() //  Wait for all goroutines to finish
+	c.Wait()  //  Ensure all async requests are completed
+
 
 	return visited, nil
 }
